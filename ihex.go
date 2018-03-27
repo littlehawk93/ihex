@@ -8,23 +8,22 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"os"
 	"strconv"
 	"strings"
 )
 
 const (
-	maxRecordLen     = 521
-	recordStartCode  = 58
+	maxRecordLen    = 521
+	recordStartCode = 58
 
 	// HexFileTypeI8HEX the I8HEX file specification
-	HexFileTypeI8HEX = 8,
+	HexFileTypeI8HEX = 8
 
 	// HexFileTypeI16HEX the I16HEX file specification
-	HexFileTypeI16HEX = 16,
+	HexFileTypeI16HEX = 16
 
 	// HexFileTypeI16HEX the I32HEX file specification
-	HexFileTypeI32HEX = 32,
+	HexFileTypeI32HEX = 32
 
 	// RecordTypeData type of record that contains data.
 	RecordTypeData = 0
@@ -32,17 +31,17 @@ const (
 	// RecordTypeEndOfFile type of record that indicates the end of the Intel HEX file.
 	RecordTypeEndOfFile = 1
 
-	// RecordTypeExtendedSegmentAddress type of record that contains a 16 bit segment base address. 
-	// Useable by I16HEX files only. 
+	// RecordTypeExtendedSegmentAddress type of record that contains a 16 bit segment base address.
+	// Useable by I16HEX files only.
 	// Multiply this record value by 16 and add to the address of all subsequent records.
 	RecordTypeExtendedSegmentAddress = 2
 
 	// RecordTypeStartSegmentAddress type of record that Initializes content of CS:IP registers for 80x86 processors.
-	// Useable by I16HEX files only. 
+	// Useable by I16HEX files only.
 	RecordTypeStartSegmentAddress = 3
 
-	// RecordTypeExtendedLinearAddress type of record that contains a 16 bit segment base address. 
-	// Useable by I32HEX files only. 
+	// RecordTypeExtendedLinearAddress type of record that contains a 16 bit segment base address.
+	// Useable by I32HEX files only.
 	// Use as the higher 16 bits of subsequent record addresses to form 32 bit addresses.
 	RecordTypeExtendedLinearAddress = 4
 
@@ -58,7 +57,7 @@ type Record struct {
 	Data          []byte
 }
 
-func (me *Record) write(writer io.Writer) error {
+func (me *Record) writeTo(writer io.Writer) (int, error) {
 
 	buff := bytes.NewBufferString(":")
 
@@ -78,10 +77,10 @@ func (me *Record) write(writer io.Writer) error {
 	err = me.writeNoErr(buff, "\n", err)
 
 	if err != nil {
-		err = writer.Write(buff.Bytes())
+		return 0, err
 	}
 
-	return err
+	return writer.Write(buff.Bytes())
 }
 
 func (me *Record) writeNoErr(buff *bytes.Buffer, str string, err error) error {
@@ -95,30 +94,32 @@ func (me *Record) writeNoErr(buff *bytes.Buffer, str string, err error) error {
 	return err
 }
 
-func (me *Record) read(scanner *bufio.Scanner) error {
+func (me *Record) readFrom(scanner *bufio.Scanner) (int, error) {
 
 	bytes := scanner.Bytes()
 
+	bytesLen := len(bytes)
+
 	if len(bytes) > maxRecordLen {
-		return fmt.Errorf("Record size (%d) than maximum record size (%d)", len(bytes), maxRecordLen)
+		return bytesLen, fmt.Errorf("Record size (%d) than maximum record size (%d)", len(bytes), maxRecordLen)
 	}
 
 	if bytes[0] != recordStartCode {
-		return errors.New("Invalid start code for record")
+		return bytesLen, errors.New("Invalid start code for record")
 	}
 
 	byteCount, err := strconv.ParseInt(string(bytes[1:3]), 16, 8)
 
 	if err != nil {
-		return fmt.Errorf("Error parsing Byte Count: %s", err.Error())
+		return bytesLen, fmt.Errorf("Error parsing Byte Count: %s", err.Error())
 	}
 
 	actualByteCount := (len(bytes) - 11) / 2
 
 	if byteCount > 255 {
-		return errors.New("Invalid Byte Count provided")
+		return bytesLen, errors.New("Invalid Byte Count provided")
 	} else if int(byteCount) != actualByteCount {
-		return fmt.Errorf("Record Byte Count (%d) does not match actual byte count (%d)", byteCount, actualByteCount)
+		return bytesLen, fmt.Errorf("Record Byte Count (%d) does not match actual byte count (%d)", byteCount, actualByteCount)
 	}
 
 	me.Data = make([]byte, int(byteCount))
@@ -126,7 +127,7 @@ func (me *Record) read(scanner *bufio.Scanner) error {
 	address, err := strconv.ParseUint(string(bytes[3:7]), 16, 16)
 
 	if err != nil {
-		return fmt.Errorf("Error parsing Address: %s", err.Error())
+		return bytesLen, fmt.Errorf("Error parsing Address: %s", err.Error())
 	}
 
 	me.AddressOffset = uint16(address)
@@ -134,7 +135,7 @@ func (me *Record) read(scanner *bufio.Scanner) error {
 	recordType, err := strconv.ParseUint(string(bytes[7:9]), 16, 8)
 
 	if err != nil {
-		return fmt.Errorf("Error parsing Record Type: %s", err.Error())
+		return bytesLen, fmt.Errorf("Error parsing Record Type: %s", err.Error())
 	}
 
 	me.RecordType = byte(recordType)
@@ -142,42 +143,44 @@ func (me *Record) read(scanner *bufio.Scanner) error {
 	decodedBytes, err := hex.Decode(me.Data, bytes[9:bytesLen-2])
 
 	if err != nil {
-		return fmt.Errorf("Unable to parse record data: %s", err.Error())
+		return bytesLen, fmt.Errorf("Unable to parse record data: %s", err.Error())
 	}
 
 	if decodedBytes != len(me.Data) {
-		return errors.New("Unable to parse record data: Incorrect number of bytes parsed")
+		return bytesLen, errors.New("Unable to parse record data: Incorrect number of bytes parsed")
 	}
 
 	recordChecksum, err := strconv.ParseUint(string(bytes[bytesLen-2:bytesLen]), 16, 8)
 
 	if err != nil {
-		return fmt.Errorf("Error parsing Checksum: %s", err.Error())
+		return bytesLen, fmt.Errorf("Error parsing Checksum: %s", err.Error())
 	}
 
 	actualChecksum := generateChecksum(me.Data, me.RecordType)
 
 	if byte(recordChecksum) != actualChecksum {
-		return errors.New("Record checksum doesn't match computed checksum")
+		return bytesLen, errors.New("Record checksum doesn't match computed checksum")
 	}
 
-	return nil
+	return bytesLen, nil
 }
 
-// I8HEX the I8HEX subfile type of the Intel HEX specification.
+// HexFile the I8HEX subfile type of the Intel HEX specification.
 type HexFile struct {
-	Type          byte
-	records       []Record
-	recordIndex   int
+	Type        byte
+	records     []Record
+	recordIndex int
 }
 
 // Next advances the internal cursor to the next HEX record.
-// Must be called at least once before calling the Record() method to initialize the internal cursor. 
+// Must be called at least once before calling the Record() method to initialize the internal cursor.
 // Returns false when there are no more records to read.
 // Otherwise, returns true.
-func (me *HexFile) Next() *Record {
+func (me *HexFile) Next() bool {
 
-	return ++me.recordIndex < len(me.records)
+	me.recordIndex++
+
+	return me.recordIndex < len(me.records)
 }
 
 // Record retrieves the HEX record at the current position of the internal cursor
@@ -188,12 +191,12 @@ func (me *HexFile) Record() *Record {
 		return nil
 	}
 
-	return me.records[me.recordIndex]
+	return &me.records[me.recordIndex]
 }
 
 // ReadFrom reads HEX formatted record data from a reader.
 // Returns any errors generated.
-func (me *HexFile) ReadFrom(reader io.Reader) error {
+func (me *HexFile) ReadFrom(reader io.Reader) (int64, error) {
 
 	scanner := bufio.NewScanner(reader)
 
@@ -201,26 +204,31 @@ func (me *HexFile) ReadFrom(reader io.Reader) error {
 
 	lineNumber := 1
 
-	for scanner.Next() {
+	var sum int64
+	sum = 0
+
+	for scanner.Scan() {
 
 		var record Record
 
-		err := record.read(scanner)
+		b, err := record.readFrom(scanner)
+
+		sum += int64(b)
 
 		if err != nil {
 			if err == io.EOF {
 				break
 			} else {
-				return make([]Record, 0), fmt.Errorf("Error on line %d: '%s'", lineNumber, err.Error())
+				return 0, fmt.Errorf("Error on line %d: '%s'", lineNumber, err.Error())
 			}
 		}
 
-		if len(records) > 0 && records[len(records) - 1].RecordType == RecordTypeEndOfFile {
-			return make([]Record, 0), fmt.Errorf("Error on line %d: 'Record parsed after EOF record'", lineNumber)
+		if len(records) > 0 && records[len(records)-1].RecordType == RecordTypeEndOfFile {
+			return sum, fmt.Errorf("Error on line %d: 'Record parsed after EOF record'", lineNumber)
 		}
 
-		if !validateHEXRecord(record, me.Type) {
-			return make([]Record, 0), fmt.Errorf("Error on line %d: 'Invalid Record Type (%d)'", lineNumber, record.RecordType)
+		if !validateHEXRecord(&record, me.Type) {
+			return sum, fmt.Errorf("Error on line %d: 'Invalid Record Type (%d)'", lineNumber, record.RecordType)
 		}
 
 		records = append(records, record)
@@ -228,34 +236,34 @@ func (me *HexFile) ReadFrom(reader io.Reader) error {
 		lineNumber++
 	}
 
-	if len(records) == 0 || records[len(records) - 1].RecordType != RecordTypeEndOfFile {
-		return make([]Record, 0), fmt.Errorf("Error: No EOF record type parsed before EOF")
-	}
-
-	if err != nil {
-		return err
+	if len(records) == 0 || records[len(records)-1].RecordType != RecordTypeEndOfFile {
+		return sum, fmt.Errorf("Error: No EOF record type parsed before EOF")
 	}
 
 	me.records = records
 	me.Reset()
 
-	return nil
+	return sum, nil
 }
 
-// Write writes this HEX file data to a writer.
+// WriteTo writes this HEX file data to a writer.
 // Returns any errors generated.
-func (me *HexFile) WriteTo(writer io.Writer) error {
+func (me *HexFile) WriteTo(writer io.Writer) (int64, error) {
+
+	var sum int64
 
 	for _, record := range me.records {
 
-		err := record.write(writer)
+		amt, err := record.writeTo(writer)
+
+		sum += int64(amt)
 
 		if err != nil {
-			return err
+			return sum, err
 		}
 	}
 
-	return nil
+	return sum, nil
 }
 
 // AddRecord adds a new HEX record to this HEX file.
@@ -265,7 +273,7 @@ func (me *HexFile) AddRecord(record *Record) error {
 		return errors.New("Invalid record type for this HEX type")
 	}
 
-	if len(me.records) > 0 && me.records[len(me.records) - 1].RecordType == RecordTypeEndOfFile {
+	if len(me.records) > 0 && me.records[len(me.records)-1].RecordType == RecordTypeEndOfFile {
 		return errors.New("Cannot add records after EOF record has been added")
 	}
 
@@ -302,12 +310,12 @@ func validateHEXRecord(record *Record, hexType byte) bool {
 	if hexType == HexFileTypeI8HEX {
 		return isDataOrEOF
 	} else if hexType == HexFileTypeI16HEX {
-		return isDataOrEOF || record.RecordType == RecordTypeExtendedSegmentAddress || record.RecordType == RecordTypeExtendedSegmentAddress
+		return isDataOrEOF || record.RecordType == RecordTypeExtendedSegmentAddress || record.RecordType == RecordTypeStartSegmentAddress
 	} else if hexType == HexFileTypeI32HEX {
 		return isDataOrEOF || record.RecordType == RecordTypeExtendedLinearAddress || record.RecordType == RecordTypeStartLinearAddress
-	} else {
-		return false
 	}
+
+	return false
 }
 
 func generateChecksum(data []byte, recordType byte) byte {
