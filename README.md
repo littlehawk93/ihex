@@ -32,7 +32,7 @@ To read an Intel HEX file in the I8HEX specification:
 
         hexFile.Type = ihex.HexFileTypeI8HEX
 
-        err := hexFile.ReadFrom(file)
+        _, err := hexFile.ReadFrom(file)
 
         if err == nil {
 
@@ -78,7 +78,7 @@ HEX file structs can be written back to Intel HEX file specification to any writ
 
     if err == nil {
         
-        err = hexFile.WriteTo(file)
+        _, err = hexFile.WriteTo(file)
 
         // Error handling
     }
