@@ -54,8 +54,8 @@ func (me Record) validate(fileType FileType) bool {
 }
 
 // write writes this record's data to a writer in valid IHEX format.
-// Returns any errors created during the writing process.
-func (me Record) write(w io.Writer) error {
+// Returns number of bytes written and any errors created during the writing process.
+func (me Record) write(w io.Writer) (int, error) {
 
 	buf := bytes.NewBufferString(fmt.Sprintf("%c%02X%04X%02X", recordStartChar, len(me.Data), me.AddressOffset, me.Type))
 
@@ -63,11 +63,10 @@ func (me Record) write(w io.Writer) error {
 	hex.Encode(hexBytes, me.Data)
 
 	if _, err := buf.WriteString(fmt.Sprintf("%s%02X\n", strings.ToUpper(string(hexBytes)), me.getChecksum())); err != nil {
-		return err
+		return 0, err
 	}
 
-	_, err := w.Write(buf.Bytes())
-	return err
+	return w.Write(buf.Bytes())
 }
 
 // getChecksum generates the 8 bit checksum for this record.

@@ -35,8 +35,7 @@ func WriteFile(f File, w io.Writer) error {
 
 	i := 1
 	for r, ok := f.ReadNext(); ok; r, ok = f.ReadNext() {
-
-		if err := r.write(w); err != nil {
+		if _, err := r.write(w); err != nil {
 			return fmt.Errorf("Error writing file at record %d: %s", i, err.Error())
 		}
 		i++
