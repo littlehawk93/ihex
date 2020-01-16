@@ -1,5 +1,7 @@
 # IHEX
 
+[![GoDoc](https://godoc.org/github.com/littlehawk93/ihex?status.svg)](https://godoc.org/github.com/littlehawk93/ihex)
+
 Library for reading and writing Intel HEX files according to the specification outlined in [Wikipedia's Article](https://en.wikipedia.org/wiki/Intel_HEX).
 
 ### Features
