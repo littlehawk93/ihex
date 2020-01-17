@@ -1,21 +1,28 @@
 package ihex
 
+import (
+	"encoding/binary"
+	"errors"
+	"fmt"
+	"io"
+)
+
 const (
-	writerMaximumI8HEXRecords int64 = 65536
+	writerMaximumI8HEXRecords  int64 = 65536
 	writerMaximumI16HEXRecords int64 = 1048576
-	writerMaximumI32HEXRecords int64 = 4294967296‬
+	writerMaximumI32HEXRecords int64 = 4294967296
 )
 
 // FileWriter writes a stream of bytes into HEX file format.
 // The data is organized into records of fixed width with continuously incrementing addresses.
 type FileWriter struct {
-	recordSize int
+	recordSize  int
 	recordCount int64
-	buffer []byte
+	buffer      []byte
 	bufferIndex int
-	fileType FileType
-	writer io.Writer
-	closed bool
+	fileType    FileType
+	writer      io.Writer
+	closed      bool
 }
 
 // Write writes the provided binary data in HEX format to the underlying writer.
@@ -23,8 +30,11 @@ type FileWriter struct {
 // Returns the number of bytes written (including the address and other header bytes of the record) or any errors encountered during writing.
 func (me *FileWriter) Write(p []byte) (n int, err error) {
 
+	if me.closed {
+		return 0, errors.New("This FileWriter is closed")
+	}
+
 	sum := 0
-	var err error
 
 	for i := 0; i < len(p); i++ {
 
@@ -33,7 +43,7 @@ func (me *FileWriter) Write(p []byte) (n int, err error) {
 
 		if me.bufferIndex >= me.recordSize {
 			me.bufferIndex = 0
-			n, err = me.writeRecord(me.buffer)
+			n, err = me.writeDataRecord(me.buffer)
 			sum += n
 			if err != nil {
 				return sum, err
@@ -55,16 +65,16 @@ func (me *FileWriter) Close() error {
 	me.closed = true
 
 	if me.bufferIndex > 0 {
-		for i := me.bufferIndex+1; i < len(me.buffer); i++ {
-			me.buffer[i] = 0;
+		for i := me.bufferIndex + 1; i < len(me.buffer); i++ {
+			me.buffer[i] = 0
 		}
 
-		if _, err := me.writeRecord(me.buffer); err != nil {
+		if _, err := me.writeDataRecord(me.buffer); err != nil {
 			return err
 		}
 	}
 
-	if c, ok := me.writer.(Closer); ok {
+	if c, ok := me.writer.(io.Closer); ok {
 		return c.Close()
 	}
 	return nil
@@ -75,7 +85,7 @@ func (me *FileWriter) Close() error {
 func NewFileWriter(w io.Writer, recordSize int) (*FileWriter, error) {
 
 	return NewFileWriterType(w, recordSize, I32HEX)
-} 
+}
 
 // NewFileWriterType create and initialize a new FileWriter with the specified underlying writer to write HEX data into.
 // All records written by this FileWriter will have data size of recordSize bytes.
@@ -87,20 +97,20 @@ func NewFileWriterType(w io.Writer, recordSize int, fileType FileType) (*FileWri
 	}
 
 	return &FileWriter{
-		recordSize: recordSize,
+		recordSize:  recordSize,
 		recordCount: 0,
-		buffer: make([]byte, recordSize),
+		buffer:      make([]byte, recordSize),
 		bufferIndex: 0,
-		fileType: fileType,
-		writer: w,
-		closed: false,
+		fileType:    fileType,
+		writer:      w,
+		closed:      false,
 	}, nil
 }
 
 // writeDataRecord handles writing a single record to the underlying writer.
 // Automatically increments the FileWriter record count as new records are written.
 // Automatically inserts address extension records as needed when record counts exceed I8HEX specifications.
-// Returns the number of bytes written to the underlying writer and any errors that occurred during writing. 
+// Returns the number of bytes written to the underlying writer and any errors that occurred during writing.
 func (me *FileWriter) writeDataRecord(data []byte) (int, error) {
 
 	if (me.fileType == I8HEX && me.recordCount >= writerMaximumI8HEXRecords) || (me.fileType == I16HEX && me.recordCount >= writerMaximumI16HEXRecords) || (me.fileType == I32HEX && me.recordCount >= writerMaximumI32HEXRecords) {
@@ -113,11 +123,11 @@ func (me *FileWriter) writeDataRecord(data []byte) (int, error) {
 
 	// evaluates for I32HEX and I16HEX. Whenever the maximum 16 bit address is reached
 	// calculates the appropriate data value for the extended address record about to be written
-	if address = 0 && me.recordCount > 0 {
+	if address == 0 && me.recordCount > 0 {
 		// Linear Segment Adddress (future data records' addresses get an additional upper 16 bits equal to this value to create a 32 bit address)
 		if me.fileType == I32HEX {
 			addressExtension = uint16((me.recordCount & 0x000000000000FF00) >> 16)
-		// Extended Segment Address (future data records' addresses get offset by this value x 16)
+			// Extended Segment Address (future data records' addresses get offset by this value x 16)
 		} else if me.fileType == I16HEX {
 			addressExtension = uint16(me.recordCount / 16)
 		}
@@ -136,9 +146,9 @@ func (me *FileWriter) writeDataRecord(data []byte) (int, error) {
 		}
 
 		r := Record{
-			Type: t,
-			Address: 0,
-			Data: b,
+			Type:          t,
+			AddressOffset: 0,
+			Data:          b,
 		}
 
 		n, err := r.write(me.writer)
@@ -152,13 +162,11 @@ func (me *FileWriter) writeDataRecord(data []byte) (int, error) {
 	me.recordCount++
 
 	r := Record{
-		Type: RecordData,
+		Type:          RecordData,
 		AddressOffset: address,
-		Data: data,
+		Data:          data,
 	}
 
 	n, err := r.write(me.writer)
 	return n + sum, err
 }
-
-func (me *FileWriter)
