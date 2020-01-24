@@ -74,6 +74,16 @@ func (me *FileWriter) Close() error {
 		}
 	}
 
+	endRecord := Record{
+		Type:          RecordEOF,
+		Data:          make([]byte, 0),
+		AddressOffset: 0,
+	}
+
+	if _, err := endRecord.write(me.writer); err != nil {
+		return err
+	}
+
 	if c, ok := me.writer.(io.Closer); ok {
 		return c.Close()
 	}
